@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Text File Compressor</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: monospace;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        input[type="file"], button {
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+            border: 1px solid #333;
+            padding: 10px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #status {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Text Filter / Compressor</h2>
+    
+    <!-- File Input -->
+    <input type="file" id="fileInput" accept=".txt">
+
+    <!-- Action Buttons -->
+    <button id="downloadBtn" disabled>Download Compressed File</button>
+
+    <!-- Status Message -->
+    <div id="status">Status: Ready</div>
+</div>
+
+<script>
+    const fileInput = document.getElementById('fileInput');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const statusDiv = document.getElementById('status');
+
+    let processedBlobUrl = null;
+
+    fileInput.addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // Reset state
+        downloadBtn.disabled = true;
+        if (processedBlobUrl) {
+            URL.revokeObjectURL(processedBlobUrl);
+            processedBlobUrl = null;
+        }
+
+        statusDiv.innerText = "Status: Processing file...";
+
+        try {
+            const foundPrefixes = new Set();
+
+            // Read file in chunks to handle large files without memory crashes
+            const chunkSize = 2 * 1024 * 1024; // 2 MB chunks
+            let offset = 0;
+            let leftover = "";
+
+            while (offset < file.size) {
+                const chunk = file.slice(offset, offset + chunkSize);
+                const text = await chunk.text();
+                
+                // Prepend leftover text from the previous chunk
+                const content = leftover + text;
+                
+                // Split on newlines
+                const lines = content.split(/\r?\n/);
+
+                // Save the last element as it might be incomplete across chunk boundaries
+                leftover = lines.pop();
+
+                for (let i = 0; i < lines.length; i++) {
+                    processLine(lines[i], foundPrefixes);
+                }
+
+                offset += chunkSize;
+                const percent = Math.min(100, Math.round((offset / file.size) * 100));
+                statusDiv.innerText = `Status: Processing... ${percent}% (${foundPrefixes.size} unique keys found)`;
+            }
+
+            // Process remaining leftover text from final chunk
+            if (leftover) {
+                processLine(leftover, foundPrefixes);
+            }
+
+            // Convert extracted results to plain text string output
+            const resultText = Array.from(foundPrefixes).join("\n");
+            
+            // Create Blob for download without rendering to DOM
+            const blob = new Blob([resultText], { type: "text/plain" });
+            processedBlobUrl = URL.createObjectURL(blob);
+
+            downloadBtn.disabled = false;
+            statusDiv.innerText = `Status: Complete! Extracted ${foundPrefixes.size} unique keys from ${(file.size / (1024 * 1024)).toFixed(2)} MB file.`;
+
+        } catch (error) {
+            console.error(error);
+            statusDiv.innerText = "Status: Error processing file.";
+        }
+    });
+
+    function processLine(line, foundPrefixes) {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        const colonIdx = trimmed.indexOf(':');
+        if (colonIdx !== -1) {
+            // Extract everything before the first colon
+            const prefix = trimmed.substring(0, colonIdx).trim();
+            if (prefix) {
+                foundPrefixes.add(prefix);
+            }
+        } else {
+            // Fallback for lines without a colon: add trimmed line as key
+            foundPrefixes.add(trimmed);
+        }
+    }
+
+    downloadBtn.addEventListener('click', () => {
+        if (!processedBlobUrl) return;
+        const a = document.createElement('a');
+        a.href = processedBlobUrl;
+        a.download = "compressed.txt";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    });
+</script>
+
+</body>
+</html>
